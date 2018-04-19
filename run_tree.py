@@ -41,18 +41,22 @@ class TreeRNN(object):
 		final=h.pop()
 		return dy.tanh(final)
 
+import sys
+sys.stdout.write("Staarting off")
 model = dy.Model()
 batch_size=64
 trainer = dy.AdamTrainer(model)
 treernn=TreeRNN(model)
 import time
-
-data=Nlidataset("/Users/anhadmohananey/Downloads/snli_1.0/snli_1.0_dev.jsonl","/Users/anhadmohananey/Downloads/glove/glove.6B.300d.txt")
-#data=Nlidataset("/scratch/am8676/snli_1.0/snli_1.0_train.jsonl","/scratch/am8676/glove.840B.300d.txt")
+file=open("out.x.2", "w")
+#data=Nlidataset("/Users/anhadmohananey/Downloads/snli_1.0/snli_1.0_dev.jsonl","/Users/anhadmohananey/Downloads/glove/glove.6B.300d.txt")
+data=Nlidataset("/scratch/am8676/snli_1.0/snli_1.0_train.jsonl","/scratch/am8676/glove.840B.300d.txt")
 now=time.time()
 for i in range(0, len(data), batch_size):	
 	losses=[]
 	dy.renew_cg()
+	file.write(str(i))
+	file.write("-")
 	print("Batch Training"+str(i))
 	for v in data.ra(i, batch_size):		
 		(s1, s2, t1, t2), label=v
@@ -65,6 +69,8 @@ for i in range(0, len(data), batch_size):
 	later=time.time()
 	difference=int(later-now)
 	print(difference)
+        file.write(str(difference)+"....")
+	file.flush()
 	#import pdb;pdb.set_trace()
 	batch_loss=dy.esum(losses)/batch_size
 	batch_loss.backward()
