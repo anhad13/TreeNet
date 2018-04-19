@@ -47,22 +47,27 @@ trainer = dy.AdamTrainer(model)
 treernn=TreeRNN(model)
 import time
 
-#data=Nlidataset("/Users/anhadmohananey/Downloads/snli_1.0/snli_1.0_dev.jsonl","/Users/anhadmohananey/Downloads/glove/glove.6B.300d.txt")
-data=Nlidataset("/scratch/am8676/snli_1.0/snli_1.0_train.jsonl","/scratch/am8676/glove.840B.300d.txt")
+data=Nlidataset("/Users/anhadmohananey/Downloads/snli_1.0/snli_1.0_dev.jsonl","/Users/anhadmohananey/Downloads/glove/glove.6B.300d.txt")
+#data=Nlidataset("/scratch/am8676/snli_1.0/snli_1.0_train.jsonl","/scratch/am8676/glove.840B.300d.txt")
 now=time.time()
 for i in range(0, len(data), batch_size):	
 	losses=[]
+	dy.renew_cg()
 	print("Batch Training"+str(i))
-	for v in data.ra(i, batch_size):
-		dy.renew_cg()
+	for v in data.ra(i, batch_size):		
 		(s1, s2, t1, t2), label=v
 		preds=treernn(s1, t1, s2, t2)
 		#import pdb;pdb.set_trace()
 		loss=dy.pickneglogsoftmax(preds, label)
-		loss.backward()
-		trainer.update()
+		losses.append(loss)
+		#loss.backward()
+		#trainer.update()
 	later=time.time()
 	difference=int(later-now)
 	print(difference)
+	#import pdb;pdb.set_trace()
+	batch_loss=dy.esum(losses)/batch_size
+	batch_loss.backward()
+	trainer.update()
 #just the traing for now
 
