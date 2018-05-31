@@ -166,7 +166,7 @@ for k in vocab.keys():
     c+=1
 model = dy.Model()
 batch_size=64
-eval_every=batch_size*50
+eval_every=batch_size*100
 training_data=read_dataset("/scratch/am8676/snli_1.0/snli_1.0_train.jsonl", vocab)
 dev_data=read_dataset("/scratch/am8676/snli_1.0/snli_1.0_dev.jsonl", vocab)
 trainer = dy.AdamTrainer(model)
@@ -180,44 +180,47 @@ dy.renew_cg()
 start_time=time.time()
 filename=open("dynetsnli-1.0", "w")
 losses=[]
-for i in range(len(training_data)):
-    Wf=dy.parameter(WfU)
-    d=training_data[i]
-    t1, _=treernn.expr_for_tree(d[0], d[1])
-    t2, _=treernn.expr_for_tree(d[2], d[3])
-    preds=Wf*dy.concatenate([t1,t2])
-    losses.append(dy.pickneglogsoftmax(preds, d[4]))
-    if i>0 and i%batch_size==0:
-        batch_loss=dy.esum(losses)/len(losses)
-        print("batch done")
-        difference=time.time()-start_time
-        filename.write(str(i)+":"+str(difference)+"--")
-	filename.write("\n")
-        filename.flush()
-        losses=[]
-        batch_loss.backward()
-        trainer.update()
-        dy.renew_cg()
-    if i>0 and i%eval_every==0:
-        print("Running eval!")
-        results=[]
-        actual_results=[]
-        correct=0.0
-        for j in range(len(dev_data)):
-	    Wf=dy.parameter(WfU)
-            d=dev_data[j]
-            t1, _=treernn.expr_for_tree(d[0], d[1])
-            t2, _=treernn.expr_for_tree(d[2], d[3])
-            preds=Wf*dy.concatenate([t1,t2])
-            results.append(preds)
-            actual_results.append(d[4])
-            if j>0 and j%batch_size==0:
-                predictions=np.array([np.argmax(act_value.value()) for act_value in results])
-                actual_results=np.array(actual_results)
-                correct+=np.sum(actual_results==predictions)
-                dy.renew_cg()
-                actual_results=[]
-                results=[]
-        print("Dev accuracy:"+ str(float(correct)/len(dev_data)))
-        filename.write("Dev accuracy:"+ str(float(correct)/len(dev_data)))
-        filename.flush()
+no_epochs=5
+for epoch_number in range(no_epochs):
+    for i in range(len(training_data)):
+        Wf=dy.parameter(WfU)
+        d=training_data[i]
+        t1, _=treernn.expr_for_tree(d[0], d[1])
+        t2, _=treernn.expr_for_tree(d[2], d[3])
+        preds=Wf*dy.concatenate([t1,t2])
+        losses.append(dy.pickneglogsoftmax(preds, d[4]))
+        if i>0 and i%batch_size==0:
+            batch_loss=dy.esum(losses)/len(losses)
+            print("batch done")
+            difference=time.time()-start_time
+            filename.write(str(i)+":"+str(difference)+"--")
+            filename.write("\n")
+            filename.flush()
+            losses=[]
+            batch_loss.backward()
+            trainer.update()
+            dy.renew_cg()
+        if i>0 and i%eval_every==0:
+            print("Running eval!")
+            results=[]
+            actual_results=[]
+            correct=0.0
+            for j in range(len(dev_data)):
+                Wf=dy.parameter(WfU)
+                d=dev_data[j]
+                t1, _=treernn.expr_for_tree(d[0], d[1])
+                t2, _=treernn.expr_for_tree(d[2], d[3])
+                preds=Wf*dy.concatenate([t1,t2])
+                results.append(preds)
+                actual_results.append(d[4])
+                if j>0 and j%batch_size==0:
+                    predictions=np.array([np.argmax(act_value.value()) for act_value in results])
+                    actual_results=np.array(actual_results)
+                    correct+=np.sum(actual_results==predictions)
+                    dy.renew_cg()
+                    actual_results=[]
+                    results=[]
+            print("Dev accuracy:"+ str(float(correct)/len(dev_data)))
+            filename.write("Dev accuracy:"+ str(float(correct)/len(dev_data)))
+            filename.write("\n")
+            filename.flush()
