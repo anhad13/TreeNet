@@ -114,7 +114,7 @@ class TreeLSTMWO(object):
         token_n=0
         for i in range(len(transitions)):
             if transitions[i]==0:#shift
-                E = dy.parameter(self.E)
+                E = self.E#dy.parameter(self.E)
                 emb=E[tokens[token_n]]
                 token_n+=1
                 Wi,Wo,Wu   = [dy.parameter(w) for w in self.WS]
@@ -166,9 +166,9 @@ for k in vocab.keys():
     c+=1
 model = dy.Model()
 batch_size=64
-eval_every=batch_size*5
-training_data=read_dataset("/Users/anhadmohananey/Downloads/snli_1.0/snli_1.0_train.jsonl", vocab)
-dev_data=read_dataset("/Users/anhadmohananey/Downloads/snli_1.0/snli_1.0_dev.jsonl", vocab)
+eval_every=batch_size*50
+training_data=read_dataset("/scratch/am8676/snli_1.0/snli_1.0_train.jsonl", vocab)
+dev_data=read_dataset("/scratch/am8676/snli_1.0/snli_1.0_dev.jsonl", vocab)
 trainer = dy.AdamTrainer(model)
 treernn = TreeLSTMWO(model, len(vocab)+1, 300, 300)
 #import pdb;pdb.set_trace()
@@ -191,7 +191,8 @@ for i in range(len(training_data)):
         batch_loss=dy.esum(losses)/len(losses)
         print("batch done")
         difference=time.time()-start_time
-        filename.write(str(i)+":"+str(difference))
+        filename.write(str(i)+":"+str(difference)+"--")
+	filename.write("\n")
         filename.flush()
         losses=[]
         batch_loss.backward()
@@ -203,6 +204,7 @@ for i in range(len(training_data)):
         actual_results=[]
         correct=0.0
         for j in range(len(dev_data)):
+	    Wf=dy.parameter(WfU)
             d=dev_data[j]
             t1, _=treernn.expr_for_tree(d[0], d[1])
             t2, _=treernn.expr_for_tree(d[2], d[3])
