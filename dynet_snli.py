@@ -183,6 +183,8 @@ filename=open("dynetsnli-1.0"+str(time), "w")
 losses=[]
 no_epochs=5
 for epoch_number in range(no_epochs):
+    dy.renew_cg()
+    losses=[]
     for i in range(len(training_data)):
         Wf=dy.parameter(WfU)
         Wf2=dy.parameter(WfU2)
