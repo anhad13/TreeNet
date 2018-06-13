@@ -96,7 +96,9 @@ def converter2(tokens, vocab):
         if tokens[i].lower() in vocab:
             val=vocab[tokens[i].lower()]
         else:
-            val=0
+            #val=0
+            vocab[tokens[i].lower()]=len(vocab)
+            val=len(vocab)
         ftokens.append(val)
     return ftokens
 
@@ -119,9 +121,6 @@ class TreeLSTMWO(object):
                 token_n+=1
                 Wi,Wo,Wu   = [dy.parameter(w) for w in self.WS]
                 bi,bo,bu,_ = [dy.parameter(b) for b in self.BS]
-                #i = dy.logistic(dy.affine_transform([bi, Wi, emb]))
-                #o = dy.logistic(dy.affine_transform([bo, Wo, emb]))
-                #u = dy.tanh(    dy.affine_transform([bu, Wu, emb]))
                 i = dy.logistic(bi+Wi*emb)
                 o = dy.logistic(bo+Wo*emb)
                 u = dy.tanh(    bu+Wu*emb)
@@ -167,10 +166,18 @@ for k in vocab.keys():
 model = dy.Model()
 batch_size=64
 eval_every=batch_size*100
+#import pdb;pdb.set_trace()
 training_data=read_dataset("/scratch/am8676/snli_1.0/snli_1.0_train.jsonl", vocab)
 dev_data=read_dataset("/scratch/am8676/snli_1.0/snli_1.0_dev.jsonl", vocab)
+#training_data=read_dataset("/Users/anhadmohananey/Downloads/snli_1.0/snli_1.0_train.jsonl", vocab)
+#pdb.set_trace()
+#dev_data=read_dataset("/Users/anhadmohananey/Downloads/snli_1.0/snli_1.0_dev.jsonl", vocab)
+#pdb.set_trace()
+number_unk=len(vocab)-len(vocab_embeddings)
+for i in range(number_unk):
+    vocab_embeddings.append(np.zeros(300))#set all UNK to 0. fine tune *should* take care of the rest.
 trainer = dy.AdamTrainer(model, 0.0003)
-treernn = TreeLSTMWO(model, len(vocab)+1, 300, 300)
+treernn = TreeLSTMWO(model, len(vocab_embeddings), 300, 300)
 #import pdb;pdb.set_trace()
 treernn.E.init_from_array(np.array(vocab_embeddings))
 
@@ -179,7 +186,7 @@ WfU2=model.add_parameters((3,300))
 import time
 dy.renew_cg()
 start_time=time.time()
-filename=open("dynetsnli-1.0"+str(time), "w")
+filename=open("dynetsnli-1.0"+str(start_time), "w")
 losses=[]
 no_epochs=5
 for epoch_number in range(no_epochs):
@@ -192,7 +199,7 @@ for epoch_number in range(no_epochs):
         t1, _=treernn.expr_for_tree(d[0], d[1])
         t2, _=treernn.expr_for_tree(d[2], d[3])
         preds_1=Wf*dy.concatenate([t1,t2])
-        preds_1=dy.relu(preds_1)
+        preds_1=dy.tanh(preds_1)
         preds=Wf2*preds_1
         losses.append(dy.pickneglogsoftmax(preds, d[4]))
         if i>0 and i%batch_size==0:
@@ -217,7 +224,7 @@ for epoch_number in range(no_epochs):
                 t1, _=treernn.expr_for_tree(d[0], d[1])
                 t2, _=treernn.expr_for_tree(d[2], d[3])
                 preds_1=Wf*dy.concatenate([t1,t2])
-                preds_1=dy.relu(preds_1)
+                preds_1=dy.tanh(preds_1)
                 preds=Wf2*preds_1
                 results.append(preds)
                 actual_results.append(d[4])
