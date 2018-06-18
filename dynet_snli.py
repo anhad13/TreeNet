@@ -102,19 +102,46 @@ def converter2(tokens, vocab):
         ftokens.append(val)
     return ftokens
 
-
 class TreeLSTMWO(object):
-    def __init__(self, model, vocab_size, wdim, hdim):
+    def __init__(self, model, vocab_size, wdim, hdim, tracker_lstm=False):
+        self.hidden_dim=hdim
         self.WS = [model.add_parameters((hdim, wdim)) for _ in "iou"]
         self.US = [model.add_parameters((hdim, 2*hdim)) for _ in "iou"]
-        self.UFS =[model.add_parameters((hdim, hdim)) for _ in "ff"]
+        if tracker_lstm:
+            self.US = [model.add_parameters((hdim, 3*hdim)) for _ in "iou"]
+        else:
+            self.US = [model.add_parameters((hdim, 2*hdim)) for _ in "iou"]
         self.BS = [model.add_parameters(hdim) for _ in "iouf"]
+        self.UFS =[model.add_parameters((hdim, hdim)) for _ in "ff"]
         self.E = model.add_lookup_parameters((vocab_size , wdim))
+        if tracker_lstm:
+            num_layers=1
+            self.tracker=dy.LSTMBuilder(num_layers, hdim*3, hdim, model)
+        self.transitions=[]
     def expr_for_tree(self, tokens, transitions, decorate=False):
         ha=[]
         ca=[]
         token_n=0
+        if hasattr(self, 'tracker'):
+            s=self.tracker.initial_state()
         for i in range(len(transitions)):
+            tracker_out=dy.zeros(self.hidden_dim)
+            if hasattr(self, 'tracker'):
+                tracker_in=[]
+                #add top two elements from stack.
+                if len(ha)==0:
+                    tracker_in=dy.concatenate([dy.zeros(self.hidden_dim), dy.zeros(self.hidden_dim)])
+                elif len(ha)==1:
+                    tracker_in=dy.concatenate([ha[-1], dy.zeros(self.hidden_dim)])
+                else:
+                    tracker_in=dy.concatenate([ha[-1], ha[-2]])
+                #add top element from buffer
+                if token_n>=len(tokens):#everything has already been shifted, so buf is empty!
+                    tracker_in=dy.concatenate([tracker_in, dy.zeros(self.hidden_dim)])
+                else:
+                    tracker_in=dy.concatenate([tracker_in, self.E[tokens[token_n]]])
+                s=s.add_input(tracker_in)
+                tracker_out=s.output()
             if transitions[i]==0:#shift
                 E = self.E#dy.parameter(self.E)
                 emb=E[tokens[token_n]]
@@ -133,10 +160,13 @@ class TreeLSTMWO(object):
                 c2=ca.pop()
                 e1=ha.pop()
                 e2=ha.pop()
+                if hasattr(self, 'tracker'):                    
+                    e = dy.concatenate([e1,e2, tracker_out])
+                else:
+                    e = dy.concatenate([e1,e2])
                 Ui,Uo,Uu = [dy.parameter(u) for u in self.US]
                 Uf1,Uf2 = [dy.parameter(u) for u in self.UFS]
                 bi,bo,bu,bf = [dy.parameter(b) for b in self.BS]
-                e = dy.concatenate([e1,e2])
                 i = dy.logistic(bi+Ui*e)
                 o = dy.logistic(bi+Uo*e)
                 f1 = dy.logistic(bf+Uf1*e1)
@@ -149,6 +179,29 @@ class TreeLSTMWO(object):
             else:
                 print("Invalid")
         return ha.pop(), ca.pop()
+    # def validate_action(self, tokens, transitions, action):
+    #     #checks if current action valid, otherwise returns the correct action.
+    #     if action==0:#check if shift valid
+    #         #if no of tokens exceeds left:
+    #         len(tokens)
+
+
+class FullModel(object):
+    def __init__(self, model, vocab_size, wdim, hdim, is_tracker=False):
+       self.treernn = TreeLSTMWO(model, vocab_size, wdim, hdim, is_tracker)
+       self.WfU=model.add_parameters((hdim, hdim*2))
+       self.WfU2=model.add_parameters((3,hdim))
+    def execute(self, to1, tr1, to2, tr2):
+       tree1, _=self.treernn.expr_for_tree(to1, tr1)
+       tree2, _=self.treernn.expr_for_tree(to2, tr2)
+       Wf=dy.parameter(self.WfU)
+       Wf2=dy.parameter(self.WfU2)
+       preds_1=Wf*dy.concatenate([tree1,tree2])
+       preds_1=dy.tanh(preds_1)
+       preds=Wf2*preds_1
+       return preds
+
+
 
 
 import sys
@@ -173,16 +226,14 @@ dev_data=read_dataset("/scratch/am8676/snli_1.0/snli_1.0_dev.jsonl", vocab)
 #pdb.set_trace()
 #dev_data=read_dataset("/Users/anhadmohananey/Downloads/snli_1.0/snli_1.0_dev.jsonl", vocab)
 #pdb.set_trace()
-number_unk=len(vocab)-len(vocab_embeddings)
+number_unk=len(vocab)-len(vocab_embeddings)+1
 for i in range(number_unk):
     vocab_embeddings.append(np.zeros(300))#set all UNK to 0. fine tune *should* take care of the rest.
 trainer = dy.AdamTrainer(model, 0.0003)
-treernn = TreeLSTMWO(model, len(vocab_embeddings), 300, 300)
+treernn_nli = FullModel(model, len(vocab_embeddings), 300, 300, True)
 #import pdb;pdb.set_trace()
-treernn.E.init_from_array(np.array(vocab_embeddings))
+treernn_nli.treernn.E.init_from_array(np.array(vocab_embeddings))
 
-WfU=model.add_parameters((300, 300*2))
-WfU2=model.add_parameters((3,300))
 import time
 dy.renew_cg()
 start_time=time.time()
@@ -193,14 +244,8 @@ for epoch_number in range(no_epochs):
     dy.renew_cg()
     losses=[]
     for i in range(len(training_data)):
-        Wf=dy.parameter(WfU)
-        Wf2=dy.parameter(WfU2)
         d=training_data[i]
-        t1, _=treernn.expr_for_tree(d[0], d[1])
-        t2, _=treernn.expr_for_tree(d[2], d[3])
-        preds_1=Wf*dy.concatenate([t1,t2])
-        preds_1=dy.tanh(preds_1)
-        preds=Wf2*preds_1
+        preds=treernn_nli.execute(d[0], d[1],d[2],d[3])
         losses.append(dy.pickneglogsoftmax(preds, d[4]))
         if i>0 and i%batch_size==0:
             batch_loss=dy.esum(losses)/len(losses)
@@ -219,13 +264,8 @@ for epoch_number in range(no_epochs):
             actual_results=[]
             correct=0.0
             for j in range(len(dev_data)):
-                Wf=dy.parameter(WfU)
                 d=dev_data[j]
-                t1, _=treernn.expr_for_tree(d[0], d[1])
-                t2, _=treernn.expr_for_tree(d[2], d[3])
-                preds_1=Wf*dy.concatenate([t1,t2])
-                preds_1=dy.tanh(preds_1)
-                preds=Wf2*preds_1
+                preds=treernn_nli.execute(d[0], d[1],d[2],d[3])
                 results.append(preds)
                 actual_results.append(d[4])
                 if j>0 and j%batch_size==0:
